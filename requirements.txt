@@ -9,3 +9,6 @@ textstat>=0.7
 python-dateutil>=2.9
 rapidfuzz>=3.0        # rule 1 fuzzy title/filename comparison
 pydantic>=2.7
+sentence-transformers>=3.0
+google-genai>=1.0
+python-dotenv>=1.0

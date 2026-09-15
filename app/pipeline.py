@@ -195,6 +195,14 @@ def extraction_path(filename: Optional[str]) -> str:
                         f"{output_stem(filename)}.extracted.json")
 
 
+VECTOR_STORE_PATH = os.path.join(ROOT, "vector_store.json")
+
+
+def vector_store_path(filename: Optional[str] = None) -> str:
+    """Return the single project-level persisted vector-store path."""
+    return VECTOR_STORE_PATH
+
+
 def _json_default(value):
     if isinstance(value, datetime):
         return value.isoformat()

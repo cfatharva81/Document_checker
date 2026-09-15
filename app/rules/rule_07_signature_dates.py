@@ -24,6 +24,7 @@ from .base import (
     find_dates,
     find_revision_table,
 )
+from .rule_06_signature import is_signature_table, signature_table_name_values
 
 
 class Rule07(Rule):
@@ -34,10 +35,20 @@ class Rule07(Rule):
                    "window of flow-order blocks or in the same table row.")
 
     def evaluate(self, doc: Doc, config: RuleConfig) -> Finding:
-        sig_paras = signature_paragraphs(doc)
-        if not sig_paras:
+        sig_tables = [t for t in doc.tables if is_signature_table(t)]
+        table_indexes = {t.table_index for t in sig_tables}
+        sig_paras = [p for p in signature_paragraphs(doc)
+                     if not p.in_table or p.table_pos is None
+                     or p.table_pos[0] not in table_indexes]
+        table_rows = [(table, row_index, row.cells[0].paragraphs()[0])
+                      for table in sig_tables
+                  for row_index, _name in signature_table_name_values(table)
+                  for row in [table.rows[row_index]]
+                  if row.cells and row.cells[0].paragraphs()]
+        if not sig_paras and not table_rows:
             return self.fail(
                 "No signature blocks found, so no signature carries a date.")
+        total_signatures = len(sig_paras) + len(table_rows)
 
         loc = Locator(doc)
         flow = doc.flow_ordered()
@@ -69,13 +80,29 @@ class Rule07(Rule):
                     sig, "no date on the line, in the same table row, or "
                          f"within {window} block(s) either side"))
 
+        for table, row_index, sig in table_rows:
+            found = self._nearby_date(doc, sig, flow, pos_by_index, window,
+                                      skip, loc)
+            table_location = f"Table {table.table_index + 1}, row {row_index + 1}"
+            if found:
+                date_text, where = found
+                dated.append(table_location)
+                evidence.append(
+                    f"{table_location} — dated {date_text}, found {where}")
+            else:
+                undated.append(table_location)
+                evidence.append(
+                    f"{table_location} — no date in the same table row or "
+                    f"within {window} block(s) either side")
+
         if undated:
             return self.fail(
-                f"{len(undated)} of {len(sig_paras)} signature block(s) have "
+                f"{len(undated)} of {total_signatures} signature block(s) have "
                 "no nearby date.",
                 evidence=evidence, locations=undated, confidence="heuristic")
         return self.ok(
-            f"All {len(dated)} signature block(s) have a nearby date.",
+            f"All {len(dated)} of {total_signatures} signature block(s) have "
+            "a nearby date.",
             evidence=evidence, locations=dated, confidence="heuristic")
 
     def _nearby_date(self, doc: Doc, sig: Paragraph, flow: list[Paragraph],

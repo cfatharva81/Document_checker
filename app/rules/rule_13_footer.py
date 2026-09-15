@@ -72,14 +72,15 @@ class Rule13(Rule):
         if found_page:
             detail.append(f"page number ({found_page[0]})")
 
-        if missing:
+        if not detail:
             return self.fail(
-                "Footer is missing: " + ", ".join(missing) + ".",
+                "Footer contains none of the required document details.",
                 evidence=evidence + ["found: " + ("; ".join(detail) or "none")],
                 locations=sorted(set(locations)) or [hf.location for hf in footers],
                 confidence="heuristic")
         return self.ok(
-            "Footer contains " + "; ".join(detail) + ".",
+            "Footer contains " + "; ".join(detail)
+            + ("; missing " + ", ".join(missing) if missing else "") + ".",
             evidence=evidence, locations=sorted(set(locations)),
             confidence="heuristic")
 

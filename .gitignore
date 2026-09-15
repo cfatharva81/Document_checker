@@ -5,6 +5,9 @@ __pycache__/
 .venv/
 venv/
 env/
+.env
+.env.*
+!.env.example
 .DS_Store
 
 # fixtures rebuild on demand via `python -m tests.make_fixtures`
@@ -12,6 +15,7 @@ tests/fixtures/*.docx
 
 # extraction JSON written at run time; the .gitkeep stays
 output/*.json
+vector_store.json
 
 # uploads stored at run time; the .gitkeep stays
 input/*.docx

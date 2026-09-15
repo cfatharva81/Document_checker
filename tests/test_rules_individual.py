@@ -30,6 +30,16 @@ def test_rule1_pass_on_match(extract_doc, config):
     assert f.passed is True
 
 
+def test_rule1_uses_cover_title_before_introduction(extract_doc, config):
+    d = mf.Document()
+    d.add_paragraph("Deployment Report")
+    d.add_heading("Introduction", level=1)
+    f = _run(1, extract_doc(
+        d, filename="Deployment Report_v0 - filled (1) (1).docx"), config)
+    assert f.passed is True, f.message
+    assert any("first-page title" in e for e in f.evidence)
+
+
 def _rule1(extract_doc, config, filename, title="Onboarding Guide"):
     d = mf.Document()
     mf.set_core(d, title=title)
@@ -164,6 +174,46 @@ def test_rule7_fails_without_signatures(extract_doc, config):
     assert f.passed is False
 
 
+def test_rule7_checks_signature_table_rows(extract_doc, config):
+    d = mf.Document()
+    d.add_heading("Signature Verification Log", level=1)
+    table = d.add_table(rows=2, cols=3)
+    for cell, text in zip(table.rows[0].cells,
+                          ["Name", "Signature", "Date"]):
+        cell.text = text
+    for cell, text in zip(table.rows[1].cells,
+                          ["Jane Smith", "Signed", "01/02/2024"]):
+        cell.text = text
+    f = _run(7, extract_doc(d, filename="deployment.docx"), config)
+    assert f.passed is True, f.message
+    assert "Table 1, row 2" in f.evidence[0]
+
+
+def test_rule7_ignores_revision_table_rows(extract_doc, config):
+    d = mf.Document()
+    d.add_heading("Revision History", level=1)
+    table = d.add_table(rows=2, cols=4)
+    for cell, text in zip(table.rows[0].cells,
+                          ["Revision", "Date", "Name", "Description"]):
+        cell.text = text
+    for cell, text in zip(table.rows[1].cells,
+                          ["1.0", "01/02/2024", "Jane Smith", "Update"]):
+        cell.text = text
+    f = _run(7, extract_doc(d, filename="deployment.docx"), config)
+    assert f.passed is False
+    assert "No signature blocks found" in f.message
+
+
+def test_rule7_does_not_treat_signature_heading_as_a_block(extract_doc,
+                                                            config):
+    d = mf.Document()
+    d.add_heading("Signature Verification Log", level=1)
+    f = _run(7, extract_doc(d, filename="deployment.docx"), config)
+    assert f.passed is False
+    assert "No signature blocks found" in f.message
+    assert not any("Signature Verification Log" in e for e in f.evidence)
+
+
 def test_rule7_evidence_says_where_the_date_came_from(extract_doc, config):
     f = _run(7, extract_doc(mf.golden_sop()), config)
     assert f.passed is True
@@ -216,18 +266,18 @@ def test_rule9_clean_document_passes_the_same_checker(extract_doc, config):
 
 
 # ---- rule 10 ------------------------------------------------------------
-def test_rule10_na_when_no_required_list(extract_doc):
+def test_rule10_checks_headings_when_no_required_list(extract_doc):
     cfg = RuleConfig(required_sections=[], language_checker=StubChecker())
     f = _run(10, extract_doc(mf.golden_sop()), cfg)
-    assert f.passed is None
-    assert "Please enter the sections" in f.message
+    assert f.passed is True
+    assert "properly formatted" in f.message
 
 
-def test_rule10_na_is_the_default_state(extract_doc):
-    """No section list is configured until somebody supplies one."""
+def test_rule10_uses_headings_by_default(extract_doc):
+    """No section list is needed when the document has formatted headings."""
     cfg = RuleConfig(language_checker=StubChecker())
     assert cfg.required_sections == []
-    assert _run(10, extract_doc(mf.golden_sop()), cfg).passed is None
+    assert _run(10, extract_doc(mf.golden_sop()), cfg).passed is True
 
 
 def test_rule10_lists_missing(extract_doc, config):

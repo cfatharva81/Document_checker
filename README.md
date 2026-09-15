@@ -215,7 +215,7 @@ rows for rules 1, 2 and 4.
 ```json
 {
   "required_sections": ["Purpose", "Scope", "Procedure"],
-  "_comment": "required_sections has no default: rule 10 reports 'not evaluated' until you supply one",
+  "_comment": "required_sections is optional: without it, rule 10 checks for properly formatted headings",
   "ignore_words": ["Acme", "QMS"],
   "readability_min_words": 50,
   "readability_flesch_min": 30,

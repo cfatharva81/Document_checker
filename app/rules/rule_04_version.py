@@ -117,6 +117,20 @@ class Rule04(Rule):
                 for v in find_versions(value):
                     stated.append((v, f"File metadata ({label})"))
 
+        filename_versions = find_versions(doc.filename)
+        if filename_versions and not any(
+                v == stated_v for v in filename_versions
+                for stated_v, _ in stated):
+            evidence = dedupe(
+                [f"Version {v} — {w}" for v, w in stated]
+                + [f"Version {v} — {w} (revision history)"
+                   for v, w in history])
+            return self.fail(
+                f"File name version {filename_versions[0]} is not stated "
+                "in the document.",
+                evidence=evidence + [f"File name: {doc.filename!r}"],
+                locations=dedupe([w for _, w in stated] + [w for _, w in history]))
+
         if not stated and not history:
             return self.fail(
                 "No version number is stated anywhere in the document.",

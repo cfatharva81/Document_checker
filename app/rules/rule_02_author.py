@@ -12,6 +12,7 @@ from .base import (
     header_column_index,
     normalize_key,
     table_labeled_values,
+    table_header_cells,
 )
 
 
@@ -32,6 +33,16 @@ _AUTHOR_LABEL = re.compile(
     r"created\s+by)$", re.IGNORECASE)
 _ROLE_LABEL = re.compile(
     r"^(?:role|designation|position|job\s+title)$", re.IGNORECASE)
+_APPROVER_LABEL = re.compile(
+    r"^(?:approver|approved\s+by|authori[sz]ed\s+by|prepared\s+by)$",
+    re.IGNORECASE)
+_APPROVER_SECTION = re.compile(r"^approver(?:s)?(?:\s*\(s\))?\s*$",
+                               re.IGNORECASE)
+_APPROVER_HDR = re.compile(r"\b(?:approv(?:er|ed|al)|authorized|authorised)\b",
+                           re.IGNORECASE)
+_NAME_HDR = re.compile(
+    r"\b(?:name|author|approver|approved\s+by|person|employee)\b",
+    re.IGNORECASE)
 
 
 class Rule02(Rule):
@@ -43,8 +54,13 @@ class Rule02(Rule):
                    "value like 'User' or 'Administrator'.")
 
     def _is_default(self, name: str, config: RuleConfig) -> bool:
-        return normalize_key(name) in {normalize_key(d)
-                                       for d in config.default_authors}
+        key = normalize_key(name)
+        return (key in {normalize_key(d) for d in config.default_authors}
+                or key.endswith(" user"))
+
+    def _person_name(self, value: str) -> str:
+        """Take the person field when a table cell includes role details."""
+        return re.split(r"\s*[/|]\s*", value.strip(), maxsplit=1)[0].strip()
 
     def evaluate(self, doc: Doc, config: RuleConfig) -> Finding:
         evidence: list[str] = []
@@ -85,14 +101,55 @@ class Rule02(Rule):
             role_signal = True
             evidence.append(f"document-information role: {value!r}")
 
-        # author column in the revision table
+        for value, loc in table_labeled_values(doc, _APPROVER_LABEL):
+            name = self._person_name(value)
+            role_signal = True
+            evidence.append(f"approvers-table author: {name!r} ({loc})")
+            if name and not self._is_default(name, config):
+                valid_names.append(name)
+                locations.append(loc)
+
+        # Approver/sign-off tables are another valid source of the document
+        # author. The person may be under either "Approver"/"Approved by"
+        # directly or a separate "Name" column.
+        prior_paragraphs = doc.flow_ordered()
+        for table in doc.tables:
+            headers = table_header_cells(table)
+            joined = " ".join(headers)
+            in_approver_section = any(
+                p.block_index < table.block_index
+                and _APPROVER_SECTION.fullmatch(p.text.strip())
+                for p in prior_paragraphs)
+            if not (_APPROVER_HDR.search(joined) or in_approver_section):
+                continue
+            name_columns = [i for i, header in enumerate(headers)
+                            if _NAME_HDR.search(header)]
+            if not name_columns:
+                continue
+            role_signal = True
+            for name_col in name_columns:
+                for row in table.rows[1:]:
+                    if name_col >= len(row.cells):
+                        continue
+                    raw_name = row.cells[name_col].text().strip()
+                    name = self._person_name(raw_name)
+                    if name and not _APPROVER_LABEL.fullmatch(name):
+                        evidence.append(
+                            f"approvers-table author: {name!r} "
+                            f"(Table {table.table_index + 1})")
+                        if not self._is_default(name, config):
+                            valid_names.append(name)
+                            locations.append(f"Table {table.table_index + 1}")
+
+        # Keep revision history as an additional author source.
         table = find_revision_table(doc)
         if table is not None:
             col = header_column_index(table, _AUTHOR_HDR)
             if col is not None:
                 for row in table.rows[1:]:
                     if col < len(row.cells):
-                        name = row.cells[col].text().strip()
+                        raw_name = row.cells[col].text().strip()
+                        name = self._person_name(raw_name)
                         if name and not self._is_default(name, config):
                             valid_names.append(name)
                             evidence.append(f"revision-table author: {name!r}")
@@ -107,7 +164,8 @@ class Rule02(Rule):
 
         return self.fail(
             "No valid author found: metadata is empty or a default value "
-            "and no author line or revision-table author is present.",
+            "and no author line, information-table author, revision-table "
+            "author, or approver-table author is present.",
             evidence=evidence, locations=locations, confidence="heuristic")
 
 

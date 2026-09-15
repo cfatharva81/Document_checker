@@ -30,6 +30,15 @@ from app.engine import rules_metadata
 from app.pipeline import (
     LanguageToolChecker, UploadRejected, create_language_tool,
 )
+from app.rag import (
+    BGEEmbedder,
+    ChunkRetriever,
+    GeminiGenerator,
+    InMemoryVectorStore,
+    evaluate as evaluate_rag,
+)
+from app.rag.adapter import extracted_document_from_dict
+from app.rag.chunker import chunk_document
 from app.rules.base import LanguageChecker, RuleConfig
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -70,6 +79,7 @@ class Summary(BaseModel):
 
 class AnalyzeResponse(BaseModel):
     filename: str
+    analysis_method: str
     summary: Summary
     findings: list[FindingModel]
     extraction_file: Optional[str] = Field(
@@ -79,6 +89,8 @@ class AnalyzeResponse(BaseModel):
         None, description="Path of the stored copy of the uploaded .docx, "
                           "relative to the project root; null if it could "
                           "not be written.")
+    vector_store_file: Optional[str] = Field(
+        None, description="Persisted RAG vector store, when RAG was used.")
     extraction: Optional[dict] = Field(
         None, description="The extracted Doc model, present only when the "
                           "request asked for it.")
@@ -110,6 +122,20 @@ def finding_to_model(f) -> FindingModel:
         rule_id=f.rule_id, rule_name=f.rule_name, passed=f.passed,
         severity=f.severity, message=f.message, evidence=f.evidence,
         locations=f.locations, confidence=f.confidence,
+    )
+
+
+def rag_answer_to_model(answer, severity: str) -> FindingModel:
+    status = "Passed" if answer.passed else "Failed"
+    return FindingModel(
+        rule_id=answer.rule_id,
+        rule_name=answer.rule_name,
+        passed=answer.passed,
+        severity=severity,
+        message=f"{status}: {answer.evidence}",
+        evidence=[answer.evidence],
+        locations=list(answer.locations),
+        confidence=answer.confidence,
     )
 
 
@@ -172,6 +198,40 @@ def _config(config: Optional[str], filename: str, checker) -> RuleConfig:
     return model.to_rule_config(filename, checker)
 
 
+def _rag_findings(doc, filename: str):
+    """Build and persist a vector index from the extracted Doc model."""
+    data = pipeline.doc_to_dict(doc)
+    extracted = extracted_document_from_dict(data)
+    chunks = chunk_document(extracted)
+    if not chunks:
+        raise HTTPException(422, "No searchable text was extracted from the document.")
+    try:
+        embedder = BGEEmbedder()
+        store = InMemoryVectorStore(embedder.dimension)
+        store.add(chunks, embedder.encode_documents(chunks))
+        vector_path = pipeline.vector_store_path(filename)
+        os.makedirs(pipeline.OUTPUT_DIR, exist_ok=True)
+        store.save(vector_path)
+        answers = evaluate_rag(
+            "gemini",
+            retriever=ChunkRetriever(store, embedder),
+            generator=GeminiGenerator(),
+            source=filename,
+            top_k=5,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(503, f"RAG analysis is unavailable: {exc}") from exc
+
+    severity_by_id = {item["id"]: item["severity"]
+                      for item in rules_metadata()}
+    findings = [rag_answer_to_model(
+        answer, severity_by_id.get(answer.rule_id, "warning"))
+        for answer in answers]
+    return findings, vector_path
+
+
 @router.get("/health")
 def health():
     return {"status": "ok"}
@@ -186,7 +246,8 @@ def get_rules():
 def analyze(request: Request,
             file: UploadFile = File(...),
             config: Optional[str] = Form(None),
-            include_extraction: bool = Form(False)):
+            include_extraction: bool = Form(False),
+            analysis_method: str = Form("rule_engine")):
     """Run every rule against the upload. The extraction is always saved to
     output/, but it's only included in the response if include_extraction
     is set, since a long document's extracted data is much bigger than its
@@ -194,13 +255,23 @@ def analyze(request: Request,
     name, doc, raw = _extract(file)
     checker = getattr(request.app.state, "language_checker", None)
     cfg = _config(config, name, checker)
-    findings = pipeline.analyze(doc, cfg)
+    vector_store_file = None
+    if analysis_method == "rule_engine":
+        findings = [finding_to_model(f) for f in pipeline.analyze(doc, cfg)]
+    elif analysis_method == "gemini":
+        findings, vector_path = _rag_findings(doc, name)
+        vector_store_file = _rel(vector_path)
+    else:
+        raise HTTPException(
+            422, "analysis_method must be 'rule_engine' or 'gemini'.")
     saved, data = _save_extraction(doc, name)
     return AnalyzeResponse(
         filename=name,
+        analysis_method=analysis_method,
         summary=summarize(findings),
-        findings=[finding_to_model(f) for f in findings],
+        findings=findings,
         extraction_file=saved,
+        vector_store_file=vector_store_file,
         source_file=_save_source(raw, name),
         extraction=data if include_extraction else None,
     )
@@ -250,9 +321,13 @@ def create_app(language_checker: Optional[LanguageChecker] = None) -> FastAPI:
         if language_checker is not None:
             app.state.language_checker = language_checker
         else:
-            tool = create_language_tool()
-            app.state._owned_tool = tool
-            app.state.language_checker = LanguageToolChecker(tool, lock)
+            try:
+                tool = create_language_tool()
+            except Exception:
+                app.state.language_checker = None
+            else:
+                app.state._owned_tool = tool
+                app.state.language_checker = LanguageToolChecker(tool, lock)
         try:
             yield
         finally:

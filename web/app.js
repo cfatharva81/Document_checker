@@ -20,6 +20,7 @@ function cache() {
   els.dropzone = document.getElementById("dropzone");
   els.fileInput = document.getElementById("file-input");
   els.fileName = document.getElementById("file-name");
+  els.analysisMethod = document.getElementById("analysis-method");
   els.analyzeBtn = document.getElementById("analyze-btn");
   els.downloadBtn = document.getElementById("download-btn");
   els.status = document.getElementById("status");
@@ -139,6 +140,7 @@ async function analyze() {
   const config = buildConfig();
   if (config) form.append("config", JSON.stringify(config));
   form.append("include_extraction", "true");
+  form.append("analysis_method", els.analysisMethod.value);
 
   setBusy(true);
   setStatus("Analyzing… this can take a while for long documents.", "busy");
@@ -162,7 +164,7 @@ async function analyze() {
     state.result = await res.json();
     state.extraction = state.result.extraction || null;
     setStatus(
-      `Analyzed "${state.result.filename}".`,
+      `Analyzed "${state.result.filename}" with ${methodLabel(state.result.analysis_method)}.`,
       "ok"
     );
     els.downloadBtn.disabled = false;
@@ -184,6 +186,10 @@ async function analyze() {
   } finally {
     setBusy(false);
   }
+}
+
+function methodLabel(method) {
+  return method === "gemini" ? "RAG + Gemini" : "the rule engine";
 }
 
 async function readError(res) {

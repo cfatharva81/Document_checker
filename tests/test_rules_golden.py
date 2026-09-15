@@ -81,8 +81,8 @@ def test_rule1_fails_on_filename_mismatch(extract_doc, config):
 
 def test_missing_content_is_a_failure_not_an_abstention(extract_doc, config):
     """An empty document must be reported as failing, never as passing and
-    never as 'we could not tell'. Rule 10 is the one exception: its missing
-    input is the caller's section list, not anything about the document."""
+    never as 'we could not tell'. Rule 9 is unevaluated when LanguageTool is
+    unavailable; rule 10 checks the document's heading formatting by default."""
     empty = mf.Document()
     empty.add_paragraph("x")
     doc = extract_doc(empty, filename="x.docx")
@@ -92,12 +92,12 @@ def test_missing_content_is_a_failure_not_an_abstention(extract_doc, config):
         assert f.message
 
 
-def test_rule_10_is_the_only_rule_that_can_abstain(extract_doc):
+def test_rule_9_is_the_only_rule_that_can_abstain(extract_doc):
     from app.rules.base import RuleConfig
     empty = mf.Document()
     empty.add_paragraph("x")
     doc = extract_doc(empty, filename="x.docx")
-    # no section list configured -> only rule 10 abstains
+    # no LanguageTool configured -> only rule 9 abstains
     findings = evaluate_all(doc, RuleConfig(filename="x.docx"))
     abstained = [f.rule_id for f in findings if f.passed is None]
-    assert abstained == [10]
+    assert abstained == [9]

@@ -134,10 +134,10 @@ def test_rule_08_does_not_flag_the_title_as_body_text():
     assert not any("Paragraph 0" in loc for loc in f.locations), f.evidence
 
 
-def test_rule_10_asks_for_a_section_list_when_none_is_given():
+def test_rule_10_checks_formatting_when_none_is_given():
     f = _run(10, config=_cfg(required_sections=[]))
-    assert f.passed is None
-    assert "Please enter the sections" in f.message
+    assert f.passed is True
+    assert "properly formatted" in f.message
 
 
 # ---- the headline: every rule reaches a verdict -------------------------

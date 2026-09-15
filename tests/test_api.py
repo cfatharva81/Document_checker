@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import create_app
+import app.main as main_module
 from app import pipeline
 from tests import make_fixtures as mf
 from tests.conftest import StubChecker
@@ -60,6 +61,17 @@ def test_health(client):
     assert r.json()["status"] == "ok"
 
 
+def test_app_starts_without_language_tool(monkeypatch):
+    monkeypatch.setattr(main_module, "create_language_tool",
+                        lambda: (_ for _ in ()).throw(RuntimeError("no Java")))
+    app = create_app()
+    with TestClient(app) as c:
+        assert c.get("/api/health").json()["status"] == "ok"
+        body = c.post("/api/analyze", files=_files()).json()
+    rule9 = {finding["rule_id"]: finding for finding in body["findings"]}[9]
+    assert rule9["passed"] is None
+
+
 def test_rules_metadata(client):
     r = client.get("/api/rules")
     assert r.status_code == 200
@@ -78,16 +90,52 @@ def test_analyze_happy_path(client):
     assert body["summary"]["total"] == 13
     assert body["summary"]["passed"] == 13, body["findings"]
     assert len(body["findings"]) == 13
+    assert body["analysis_method"] == "rule_engine"
+    assert body["vector_store_file"] is None
 
 
-def test_analyze_without_sections_leaves_rule_10_unevaluated(client):
-    """No section list configured -> rule 10 asks for one instead of
-    guessing a standard the document was never written to."""
+def test_analyze_can_select_gemini_rag(client, monkeypatch):
+    def fake_rag(_doc, _filename):
+        return [main_module.FindingModel(
+            rule_id=1,
+            rule_name="Title",
+            passed=True,
+            severity="warning",
+            message="Passed: title evidence",
+            evidence=["title evidence"],
+            locations=["Paragraph 1"],
+            confidence="heuristic",
+        )]
+
+    monkeypatch.setattr(main_module, "_rag_findings", fake_rag)
+    response = client.post(
+        "/api/analyze",
+        files=_files(),
+        data={"analysis_method": "gemini"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["analysis_method"] == "gemini"
+    assert body["findings"][0]["passed"] is True
+
+
+def test_analyze_rejects_unknown_analysis_method(client):
+    response = client.post(
+        "/api/analyze",
+        files=_files(),
+        data={"analysis_method": "unknown"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_analyze_without_sections_checks_document_headings(client):
+    """No section list configured -> rule 10 checks heading formatting."""
     body = client.post("/api/analyze", files=_files()).json()
     rule10 = {f["rule_id"]: f for f in body["findings"]}[10]
-    assert rule10["passed"] is None
-    assert "Please enter the sections" in rule10["message"]
-    assert body["summary"]["not_evaluated"] == 1
+    assert rule10["passed"] is True
+    assert "properly formatted" in rule10["message"]
 
 
 def test_analyze_with_config_changes_result(client):

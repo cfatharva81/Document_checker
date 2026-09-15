@@ -10,7 +10,7 @@
   <header class="site-header">
     <h1>SOP Compliance Checker</h1>
     <p class="tagline">Upload a <code>.docx</code> to check it against 13 SOP rules.
-      All checks are library- and algorithm-based &mdash; no document renderer, no LLM.</p>
+      Choose deterministic rule checks or retrieval-backed Gemini analysis.</p>
   </header>
 
   <main>
@@ -27,6 +27,16 @@
             <span class="link-like">browse</span></p>
           <p id="file-name" class="file-name" aria-live="polite"></p>
         </div>
+      </div>
+
+      <div class="analysis-choice">
+        <label for="analysis-method">Analysis method</label>
+        <select id="analysis-method">
+          <option value="rule_engine">Rule engine (deterministic)</option>
+          <option value="gemini">RAG + Gemini</option>
+        </select>
+        <span class="hint">The document is extracted first, then evaluated by
+          the selected method.</span>
       </div>
 
       <details class="config" id="config-panel">

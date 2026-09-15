@@ -20,6 +20,8 @@ from .base import (
     SIGNATURE_LABEL_RE,
     signature_paragraphs,
     table_header_cells,
+    looks_like_revision_table,
+    find_dates,
 )
 
 
@@ -38,9 +40,28 @@ def is_signature_table(table: Table) -> bool:
     headers = table_header_cells(table)
     if not headers:
         return False
+    if looks_like_revision_table(table):
+        return False
     joined = " ".join(headers)
     return bool(_SIG_TABLE_NAME.search(joined)
                and _SIG_TABLE_OTHER.search(joined))
+
+
+def signature_table_name_values(table: Table) -> list[tuple[int, str]]:
+    """Return populated name cells from data rows of a signature table."""
+    headers = table_header_cells(table)
+    name_col = next((i for i, header in enumerate(headers)
+                     if _SIG_TABLE_NAME.search(header)), None)
+    if name_col is None:
+        return []
+    values = []
+    for row_index, row in enumerate(table.rows[1:], 1):
+        if name_col >= len(row.cells):
+            continue
+        name = row.cells[name_col].text().strip()
+        if name and _has_signature_content(name):
+            values.append((row_index, name))
+    return values
 
 
 def _columns(table: Table) -> str:
@@ -48,6 +69,18 @@ def _columns(table: Table) -> str:
     if not table.rows:
         return ""
     return " | ".join(c.text().strip() for c in table.rows[0].cells)
+
+
+def _has_signature_content(text: str) -> bool:
+    """A label/date alone is not a completed signature block."""
+    text = re.sub(r"^\s*(?:prepared|reviewed|approved|authori[sz]ed|"
+                  r"checked|issued|verified|released)\s+by\s*[:\-]?",
+                  "", text, flags=re.IGNORECASE)
+    text = re.sub(r"^\s*signature\s*[:\-]?", "", text,
+                  flags=re.IGNORECASE)
+    for date_text, _ in find_dates(text):
+        text = text.replace(date_text, "")
+    return bool(re.sub(r"[\s:;,.\-_]+", "", text))
 
 
 class Rule06(Rule):
@@ -59,8 +92,11 @@ class Rule06(Rule):
 
     def evaluate(self, doc: Doc, config: RuleConfig) -> Finding:
         loc = Locator(doc)
-        sig_paras = signature_paragraphs(doc)
-        sig_tables = [t for t in doc.tables if is_signature_table(t)]
+        sig_paras = [p for p in signature_paragraphs(doc)
+                     if _has_signature_content(p.text)]
+        sig_tables = [t for t in doc.tables
+                      if is_signature_table(t)
+                      and signature_table_name_values(t)]
 
         evidence: list[str] = []
         locations: list[str] = []
@@ -74,11 +110,13 @@ class Rule06(Rule):
             locations.append(p.location)
 
         for t in sig_tables:
-            rows = max(0, len(t.rows) - 1)
-            evidence.append(
-                f"{loc.table(t)} — signature table, columns: {_columns(t)} "
-                f"({rows} signatory row(s))")
-            locations.append(f"Table {t.table_index + 1}")
+            named_rows = signature_table_name_values(t)
+            for row_index, name in named_rows:
+                table_location = f"Table {t.table_index + 1}, row {row_index + 1}"
+                evidence.append(
+                    f"{table_location} — signature block for {name!r}; "
+                    f"columns: {_columns(t)}")
+                locations.append(table_location)
 
         if evidence:
             return self.ok(

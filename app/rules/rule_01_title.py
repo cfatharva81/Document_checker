@@ -9,6 +9,7 @@ from .base import (
     RuleConfig,
     Finding,
     first_heading1,
+    heading_level,
     digits_conflict,
     normalize_filename,
     normalize_title,
@@ -19,6 +20,10 @@ from .base import (
 
 
 _TITLE_LABEL = re.compile(r"^(?:document\s+)?(?:title|name)$", re.IGNORECASE)
+_GENERIC_SECTION_HEADINGS = {
+    "abstract", "introduction", "overview", "purpose", "scope",
+    "background", "references", "appendix", "conclusion",
+}
 
 
 class Rule01(Rule):
@@ -45,9 +50,23 @@ class Rule01(Rule):
         candidates = []
         if title:
             candidates.append(("title", title, normalize_title(title)))
-        if h1_text:
+        if h1_text and normalize_title(h1_text) not in _GENERIC_SECTION_HEADINGS:
             candidates.append(("Heading 1", h1_text, normalize_title(h1_text)))
+
+        first_heading_block = h1.block_index if h1 else None
+        cover_title = next((p for p in doc.flow_ordered()
+                            if not p.in_table and p.text.strip()
+                            and heading_level(p) is None
+                            and (first_heading_block is None
+                                 or p.block_index < first_heading_block)),
+                           None)
+        if cover_title:
+            candidates.append(("first-page title", cover_title.text,
+                               normalize_title(cover_title.text)))
+
         table_titles = table_labeled_values(doc, _TITLE_LABEL)
+        table_titles = [(value, location) for value, location in table_titles
+                        if "/" not in value]
         if table_titles:
             value, table_loc = table_titles[0]
             candidates.append(

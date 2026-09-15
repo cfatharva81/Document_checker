@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from app.extractor import Doc
 from .base import (
-    COMMON_REQUIRED_SECTIONS,
     Rule,
     RuleConfig,
     Finding,
@@ -17,19 +16,25 @@ class Rule10(Rule):
     id = 10
     name = "Required sections"
     severity = "error"
-    description = ("The configured required sections must all appear as "
-                   "headings (a leading section number is allowed).")
+    description = ("Document sections must use heading formatting; an "
+                   "optional required-section list can check specific names.")
 
     def evaluate(self, doc: Doc, config: RuleConfig) -> Finding:
+        headings = list(iter_headings(doc))
+        evidence = [f"headings: {[h.text for h in headings]}"]
         required = [r for r in (config.required_sections or []) if r.strip()]
         if not required:
-            return self.na(
-                "Please enter the sections this document must contain -- "
-                "there is no default, because which sections an SOP needs is "
-                "a house rule. For example: "
-                + ", ".join(COMMON_REQUIRED_SECTIONS) + ".")
+            if not headings:
+                return self.fail(
+                    "No properly formatted sections were found. Use heading "
+                    "styles or consistent heading formatting for section "
+                    "titles.", evidence=evidence)
+            return self.ok(
+                f"Found {len(headings)} properly formatted section(s).",
+                evidence=evidence,
+                locations=[h.location for h in headings],
+                confidence="heuristic")
 
-        headings = list(iter_headings(doc))
         heading_keys = {normalized_heading_text(h.text): h for h in headings}
         heading_norm = [(normalized_heading_text(h.text), h) for h in headings]
 
@@ -53,7 +58,6 @@ class Rule10(Rule):
             else:
                 missing.append(req)
 
-        evidence = [f"headings: {[h.text for h in headings]}"]
         if missing:
             return self.fail(
                 "Missing required section(s): " + ", ".join(missing) + ".",

@@ -77,9 +77,9 @@ class Rule09(Rule):
     def evaluate(self, doc: Doc, config: RuleConfig) -> Finding:
         checker = config.language_checker
         if checker is None:
-            return self.fail(
+            return self.na(
                 "Language checking is unavailable (no LanguageTool "
-                "instance), so the text could not be checked.")
+                "instance), so rule 9 was not evaluated.")
 
         ignore = ({w.lower() for w in (config.ignore_words or [])}
                   | DEFAULT_IGNORE_TERMS)

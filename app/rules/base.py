@@ -218,7 +218,15 @@ def strip_noise(text: str) -> str:
 
 
 def normalize_filename(name: str) -> str:
-    return normalize_key(strip_noise(strip_extension(name or "")))
+    stem = strip_extension(name or "")
+    stem = re.sub(
+        r"[\s._-]+(?:v|ver|version)\.?\s*\d+(?:\.\d+)*"
+        r"(?:[\s._-]+(?:filled|final|copy|draft|revised|updated))?",
+        " ", stem, flags=re.IGNORECASE)
+    stem = re.sub(
+        r"[\s._-]+(?:filled|final|copy|draft|revised|updated)\b",
+        " ", stem, flags=re.IGNORECASE)
+    return normalize_key(strip_noise(stem))
 
 
 def normalize_title(text: str) -> str:
@@ -530,6 +538,8 @@ def signature_paragraphs(doc: Doc) -> list[Paragraph]:
     out = []
     for p in doc.flow_ordered():
         if p.in_table and p.table_pos is not None and p.table_pos[1] == 0:
+            continue
+        if heading_level(p) is not None:
             continue
         text = p.text.strip()
         if not text or p.word_count() > _SIGNATURE_LABEL_MAX_WORDS:
